@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt Tracker v3</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .receipt-card {
+            transition: transform 0.2s;
+        }
+        .receipt-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4 sm:p-8">
+
+    <div id="app" class="max-w-4xl mx-auto">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-extrabold text-indigo-700 mb-2">Receipt Tracker</h1>
+            <p class="text-gray-500">Log and manage your business expenses efficiently.</p>
+        </header>
+
+        <!-- User Information Card (Mandatory for multi-user apps) -->
+        <div id="user-info-card" class="bg-white p-4 rounded-lg shadow mb-6 border-l-4 border-yellow-500 text-sm">
+            <p class="font-semibold text-gray-700">User ID: <span id="user-id" class="font-mono text-xs bg-gray-100 p-1 rounded">...loading...</span></p>
+        </div>
+
+        <!-- Add Receipt Form -->
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">Add New Receipt</h2>
+            <form id="add-receipt-form">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Amount Input -->
+                    <div>
+                        <label for="amount" class="block text-sm font-medium text-gray-700 mb-1">Amount ($)</label>
+                        <input type="number" step="0.01" id="amount" required
+                               class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                               placeholder="e.g., 45.99">
+                    </div>
+                    <!-- Vendor Input -->
+                    <div>
+                        <label for="vendor" class="block text-sm font-medium text-gray-700 mb-1">Vendor/Store</label>
+                        <input type="text" id="vendor" required maxlength="50"
+                               class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                               placeholder="e.g., Office Depot">
+                    </div>
+                </div>
+                <!-- Date Input -->
+                <div class="mt-4">
+                    <label for="date" class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                    <input type="date" id="date" required
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <!-- Category Select -->
+                <div class="mt-4">
+                    <label for="category" class="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                    <select id="category" required
+                            class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+                        <option value="Food">Food</option>
+                        <option value="Supplies">Supplies</option>
+                        <option value="Travel">Travel</option>
+                        <option value="Software">Software</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+
+                <div class="mt-6">
+                    <button type="submit"
+                            class="w-full py-2 px-4 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+                            id="submit-button">
+                        <span id="loading-spinner" class="hidden spinner-border spinner-border-sm mr-2"></span>
+                        Save Receipt
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Receipts List -->
+        <div class="bg-white p-6 rounded-xl shadow-lg">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">Your Receipts</h2>
+            <div id="receipts-list" class="space-y-4">
+                <!-- Receipts will be inserted here by JavaScript -->
+                <p id="loading-message" class="text-center text-gray-500">Loading receipts...</p>
+            </div>
+            <p id="no-receipts" class="hidden text-center text-gray-500 mt-4">You have no receipts saved yet.</p>
+        </div>
+    </div>
+
+    <!-- Spinner Style -->
+    <style>
+        .spinner-border {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            vertical-align: text-bottom;
+            border: 0.2em solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: spinner-border .75s linear infinite;
+        }
+        @keyframes spinner-border {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+
+    <!-- Firebase SDK Imports (MUST use this format) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, onSnapshot, collection, query, serverTimestamp, orderBy, deleteDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ====================================================================
+        // 1. MANDATORY GLOBAL VARIABLES & CONFIG
+        // ====================================================================
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db;
+        let auth;
+        let userId = 'anonymous'; // Will be updated upon successful sign-in
+        let isAuthReady = false;
+
+        // ====================================================================
+        // 2. FIREBASE INITIALIZATION & AUTHENTICATION
+        // ====================================================================
+        try {
+            // Set Firestore logging for debugging
+            setLogLevel('debug');
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            console.log("Firebase initialized.");
+
+            // Handle Authentication State Change
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    // User is signed in
+                    userId = user.uid;
+                    document.getElementById('user-id').textContent = userId;
+                    isAuthReady = true;
+                    console.log("User authenticated. UID:", userId);
+                    // Start listening for receipts only after auth is ready
+                    startReceiptsListener();
+                } else {
+                    // User is signed out, attempt sign-in
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Authentication failed:", error);
+                        document.getElementById('user-id').textContent = 'ERROR';
+                    }
+                }
+            });
+        } catch (e) {
+            console.error("Failed to initialize Firebase:", e);
+        }
+
+        // ====================================================================
+        // 3. FIRESTORE DATA FUNCTIONS
+        // ====================================================================
+
+        /**
+         * Returns the correct Firestore collection path for the current user's private data.
+         * Data path: /artifacts/{appId}/users/{userId}/receipts
+         */
+        function getReceiptsCollectionRef() {
+            // NOTE: Using private data path as requested by security rules guidance
+            const collectionPath = `artifacts/${appId}/users/${userId}/receipts`;
+            return collection(db, collectionPath);
+        }
+
+        /**
+         * Adds a new receipt document to Firestore.
+         */
+        async function addReceipt(receiptData) {
+            const submitButton = document.getElementById('submit-button');
+            const loadingSpinner = document.getElementById('loading-spinner');
+
+            submitButton.disabled = true;
+            loadingSpinner.classList.remove('hidden');
+
+            try {
+                if (!isAuthReady) {
+                    console.error("Firestore not ready. Please wait for authentication.");
+                    return;
+                }
+
+                await addDoc(getReceiptsCollectionRef(), {
+                    ...receiptData,
+                    timestamp: serverTimestamp()
+                });
+                console.log("Receipt added successfully.");
+                document.getElementById('add-receipt-form').reset(); // Clear form on success
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                // In a real app, display this error to the user via a modal/message box
+            } finally {
+                submitButton.disabled = false;
+                loadingSpinner.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Deletes a receipt document from Firestore.
+         */
+        async function deleteReceipt(receiptId) {
+            try {
+                if (confirm('Are you sure you want to delete this receipt?')) {
+                     // NOTE: Using custom modal UI instead of confirm() is preferred in production
+                    await deleteDoc(doc(getReceiptsCollectionRef(), receiptId));
+                    console.log("Receipt deleted:", receiptId);
+                }
+            } catch (e) {
+                console.error("Error deleting document: ", e);
+            }
+        }
+
+        /**
+         * Sets up a real-time listener for the user's receipts.
+         */
+        function startReceiptsListener() {
+            if (!isAuthReady || !db) return;
+
+            // Using the query to listen for real-time changes
+            const q = query(getReceiptsCollectionRef());
+
+            onSnapshot(q, (snapshot) => {
+                const receipts = [];
+                snapshot.forEach((doc) => {
+                    // NOTE: Sorting is done in the UI (javascript) to avoid Firestore index issues
+                    receipts.push({ id: doc.id, ...doc.data() });
+                });
+
+                // Sort receipts by date/timestamp (newest first) in memory
+                receipts.sort((a, b) => {
+                    const dateA = a.timestamp ? a.timestamp.toDate().getTime() : 0;
+                    const dateB = b.timestamp ? b.timestamp.toDate().getTime() : 0;
+                    return dateB - dateA; // Newest first
+                });
+
+                renderReceipts(receipts);
+            }, (error) => {
+                console.error("Error fetching real-time receipts: ", error);
+                document.getElementById('loading-message').textContent = 'Error loading receipts.';
+            });
+        }
+
+        // ====================================================================
+        // 4. UI/EVENT HANDLING
+        // ====================================================================
+
+        /**
+         * Renders the list of receipts to the UI.
+         */
+        function renderReceipts(receipts) {
+            const listElement = document.getElementById('receipts-list');
+            const loadingMessage = document.getElementById('loading-message');
+            const noReceipts = document.getElementById('no-receipts');
+
+            loadingMessage.classList.add('hidden');
+
+            if (receipts.length === 0) {
+                listElement.innerHTML = '';
+                noReceipts.classList.remove('hidden');
+                return;
+            }
+
+            noReceipts.classList.add('hidden');
+            listElement.innerHTML = receipts.map(receipt => {
+                const date = receipt.timestamp ? receipt.timestamp.toDate().toLocaleDateString() : 'N/A';
+                const time = receipt.timestamp ? receipt.timestamp.toDate().toLocaleTimeString() : '';
+
+                return `
+                    <div class="receipt-card flex justify-between items-center p-4 bg-white border border-gray-200 rounded-lg shadow-sm hover:border-indigo-400">
+                        <div class="flex-grow">
+                            <p class="text-lg font-bold text-gray-800">$${(receipt.amount || 0).toFixed(2)}</p>
+                            <p class="text-sm text-gray-600">${receipt.vendor} - <span class="text-indigo-600 font-medium">${receipt.category}</span></p>
+                            <p class="text-xs text-gray-400 mt-1">${date} ${time}</p>
+                        </div>
+                        <button onclick="window.deleteReceipt('${receipt.id}')"
+                                class="text-red-500 hover:text-red-700 p-2 rounded-full transition duration-150">
+                            <!-- Trash Icon (Lucide SVG) -->
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trash-2">
+                                <path d="M3 6h18"/>
+                                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                <line x1="10" x2="10" y1="11" y2="17"/>
+                                <line x1="14" x2="14" y1="11" y2="17"/>
+                            </svg>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        /**
+         * Main form submission handler.
+         */
+        document.addEventListener('DOMContentLoaded', () => {
+            const form = document.getElementById('add-receipt-form');
+
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+
+                const amount = parseFloat(document.getElementById('amount').value);
+                const vendor = document.getElementById('vendor').value.trim();
+                const date = document.getElementById('date').value;
+                const category = document.getElementById('category').value;
+
+                if (!amount || !vendor || !date || !category) {
+                    // NOTE: Use a custom UI element for validation errors
+                    console.error("All fields are required.");
+                    return;
+                }
+
+                const receiptData = {
+                    amount: amount,
+                    vendor: vendor,
+                    date: date,
+                    category: category
+                };
+
+                addReceipt(receiptData);
+            });
+        });
+
+        // Expose functions globally for inline event handlers (like delete button)
+        window.deleteReceipt = deleteReceipt;
+
+    </script>
+</body>
+</html>
